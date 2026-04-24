@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { DataTable } from '@/components/DataTable';
 import { CopyButton } from '@/components/CopyButton';
