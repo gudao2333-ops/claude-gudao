@@ -10,6 +10,7 @@ import { ModelSelector } from '@/components/ModelSelector';
 import { BalanceBadge } from '@/components/BalanceBadge';
 import { RedeemDialog } from '@/components/RedeemDialog';
 import { MoneyText } from '@/components/MoneyText';
+import { parseSseChunkBuffer, parseSseEvent } from '@/lib/sse';
 
 type Conv = { id: string; title: string; updatedAt: string };
 type Msg = { role: 'user' | 'assistant'; content: string };
@@ -102,11 +103,28 @@ export default function ChatPage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let answer = '';
+      let buffer = '';
+      let billId = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        answer += decoder.decode(value, { stream: true });
+        buffer += decoder.decode(value, { stream: true });
+        const { events, rest } = parseSseChunkBuffer(buffer);
+        buffer = rest;
+        for (const raw of events) {
+          const event = parseSseEvent(raw);
+          if (!event || event.type === 'done') continue;
+          if (event.type === 'delta') {
+            answer += event.content;
+          } else if (event.type === 'billing') {
+            billId = String(event.payload.billId ?? billId);
+            if (event.payload.balance != null) setBalance(String(event.payload.balance));
+            if (event.payload.userCostCny != null) {
+              setCostTip(`本次消耗 ¥${String(event.payload.userCostCny)}${billId ? `，账单 ${billId}` : ''}`);
+            }
+          }
+        }
         setMessages((prev) => {
           const cp = [...prev];
           cp[cp.length - 1] = { role: 'assistant', content: answer };
@@ -116,10 +134,10 @@ export default function ChatPage() {
 
       await refreshConversations();
       await refreshMe();
-      setCostTip('回复完成，可在账单查看本次消耗。');
+      if (!costTip) setCostTip('回复完成，可在账单查看本次消耗。');
     } catch (e) {
       setMessages((prev) => prev.slice(0, -1));
-      alert((e as Error).message || '请求失败');
+      alert('当前请求失败，请稍后重试。');
     } finally {
       setLoading(false);
       abortRef.current = null;

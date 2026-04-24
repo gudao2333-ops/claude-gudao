@@ -6,6 +6,7 @@ const links = [
   ['/admin', '看板'],
   ['/admin/users', '用户'],
   ['/admin/models', '模型'],
+  ['/admin/channels', '渠道'],
   ['/admin/bills', '账单'],
   ['/admin/balance-logs', '流水'],
   ['/admin/redeem-codes', '兑换码'],

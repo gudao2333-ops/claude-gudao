@@ -3,9 +3,9 @@ import { nanoid } from 'nanoid';
 import { prisma } from '@/lib/prisma';
 import { moneyToDecimal, safeDecimal } from '@/lib/decimal';
 
-function buildCode() {
+function buildCode(prefix = 'GD') {
   const token = nanoid(12).toUpperCase();
-  return `GD-${token.slice(0, 4)}-${token.slice(4, 8)}-${token.slice(8, 12)}`;
+  return `${prefix.toUpperCase()}-${token.slice(0, 4)}-${token.slice(4, 8)}-${token.slice(8, 12)}`;
 }
 
 export async function redeemCode(code: string, userId: string) {
@@ -104,11 +104,12 @@ export async function batchCreateRedeemCodes(input: {
   expiredAt?: Date;
   remark?: string;
   createdByUserId?: string;
+  codePrefix?: string;
 }) {
   const count = Math.min(Math.max(input.count, 1), 5000);
   const codes = new Set<string>();
   while (codes.size < count) {
-    codes.add(buildCode());
+    codes.add(buildCode(input.codePrefix || 'GD'));
   }
 
   const created = await prisma.$transaction(
@@ -135,6 +136,12 @@ export async function listRedeemCodes(input: {
   batchNo?: string;
   code?: string;
   usedByUserId?: string;
+  usedByEmail?: string;
+  amount?: string;
+  createdAtFrom?: string;
+  createdAtTo?: string;
+  expiredAtFrom?: string;
+  expiredAtTo?: string;
 }) {
   const page = input.page ?? 1;
   const pageSize = input.pageSize ?? 20;
@@ -142,15 +149,39 @@ export async function listRedeemCodes(input: {
     status: input.status,
     batchNo: input.batchNo,
     code: input.code ? { contains: input.code, mode: 'insensitive' } : undefined,
-    usedByUserId: input.usedByUserId,
+    usedByUserId: input.usedByUserId || undefined,
+    amount: input.amount ? moneyToDecimal(input.amount).toString() : undefined,
+    usedByUser: input.usedByEmail ? { email: { contains: input.usedByEmail, mode: 'insensitive' } } : undefined,
+    createdAt: input.createdAtFrom || input.createdAtTo ? {
+      gte: input.createdAtFrom ? new Date(input.createdAtFrom) : undefined,
+      lte: input.createdAtTo ? new Date(input.createdAtTo) : undefined,
+    } : undefined,
+    expiredAt: input.expiredAtFrom || input.expiredAtTo ? {
+      gte: input.expiredAtFrom ? new Date(input.expiredAtFrom) : undefined,
+      lte: input.expiredAtTo ? new Date(input.expiredAtTo) : undefined,
+    } : undefined,
   };
 
   const [items, total] = await Promise.all([
-    prisma.redeemCode.findMany({ where, skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: 'desc' } }),
+    prisma.redeemCode.findMany({ where, include: { usedByUser: { select: { id: true, email: true } } }, skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: 'desc' } }),
     prisma.redeemCode.count({ where }),
   ]);
 
-  return { items, total, page, pageSize };
+  const statsRows = await prisma.redeemCode.findMany({ where, select: { status: true, amount: true } });
+  const stats = statsRows.reduce((acc, row) => {
+    const amount = safeDecimal(row.amount);
+    acc.total += 1;
+    acc.totalAmount = acc.totalAmount.add(amount);
+    acc[row.status] += 1;
+    if (row.status === RedeemCodeStatus.used) acc.usedAmount = acc.usedAmount.add(amount);
+    else if (row.status === RedeemCodeStatus.unused) acc.unusedAmount = acc.unusedAmount.add(amount);
+    return acc;
+  }, {
+    total: 0, unused: 0, used: 0, disabled: 0, expired: 0,
+    totalAmount: safeDecimal(0), usedAmount: safeDecimal(0), unusedAmount: safeDecimal(0),
+  });
+
+  return { items, total, page, pageSize, stats: { ...stats, totalAmount: stats.totalAmount.toString(), usedAmount: stats.usedAmount.toString(), unusedAmount: stats.unusedAmount.toString() } };
 }
 
 export async function disableRedeemCode(id: string) {
@@ -161,11 +192,12 @@ export async function disableRedeemCode(id: string) {
   return prisma.redeemCode.update({ where: { id }, data: { status: RedeemCodeStatus.disabled } });
 }
 
-export async function exportRedeemCodes(batchNo?: string) {
-  const rows = await prisma.redeemCode.findMany({ where: batchNo ? { batchNo } : undefined, orderBy: { createdAt: 'desc' } });
-  const header = 'code,amount,status,expiredAt,remark';
+export async function exportRedeemCodes(input: Parameters<typeof listRedeemCodes>[0]) {
+  const listed = await listRedeemCodes({ ...input, page: 1, pageSize: 100000 });
+  const rows = listed.items;
+  const header = 'code,amount,status,batchNo,expiredAt,usedBy,usedAt,remark,createdAt';
   const body = rows
-    .map((r) => `${r.code},${r.amount},${r.status},${r.expiredAt?.toISOString() ?? ''},"${(r.remark ?? '').replaceAll('"', '""')}"`)
+    .map((r) => `${r.code},${r.amount},${r.status},${r.batchNo ?? ''},${r.expiredAt?.toISOString() ?? ''},${r.usedByUser?.email ?? ''},${r.usedAt?.toISOString() ?? ''},"${(r.remark ?? '').replaceAll('"', '""')}",${r.createdAt.toISOString()}`)
     .join('\n');
   return `${header}\n${body}`;
 }

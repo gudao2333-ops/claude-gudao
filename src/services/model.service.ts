@@ -1,12 +1,13 @@
 import { prisma } from '@/lib/prisma';
 import { fetchPricing } from './newapi.service';
+import { getChannelForModel } from './channel.service';
 
 export async function getVisibleModelsForUser() {
   return prisma.aiModel.findMany({ where: { enabled: true, visible: true }, orderBy: { sort: 'asc' } });
 }
 
 export async function getAdminModels() {
-  return prisma.aiModel.findMany({ orderBy: { createdAt: 'desc' } });
+  return prisma.aiModel.findMany({ include: { channel: true }, orderBy: { createdAt: 'desc' } });
 }
 
 export async function createModel(data: Parameters<typeof prisma.aiModel.create>[0]['data']) {
@@ -21,28 +22,34 @@ export async function deleteModel(id: string) {
   return prisma.aiModel.delete({ where: { id } });
 }
 
-export async function syncNewApiPricing() {
-  const pricing = await fetchPricing();
-  const items = Array.isArray(pricing?.data) ? pricing.data : [];
-
-  for (const p of items) {
-    const modelName = String(p.model ?? '');
-    const exists = await prisma.aiModel.findFirst({ where: { newapiModelName: modelName } });
-    if (!exists) continue;
-
+export async function syncNewApiPricing(channelId?: string) {
+  const targetModels = await prisma.aiModel.findMany({ where: channelId ? { channelId } : undefined });
+  let synced = 0;
+  for (const model of targetModels) {
+    const channel = await getChannelForModel(model.id, model.channelId);
+    if (!channel) continue;
+    const pricing = await fetchPricing({
+      baseUrl: channel.baseUrl,
+      apiKey: channel.apiKey,
+      group: channel.defaultGroup ?? undefined,
+      timeoutMs: channel.timeoutMs,
+    });
+    const items = Array.isArray(pricing?.data) ? pricing.data : [];
+    const p = items.find((item: Record<string, unknown>) => String(item.model ?? '') === model.newapiModelName);
+    if (!p) continue;
     await prisma.aiModel.update({
-      where: { id: exists.id },
+      where: { id: model.id },
       data: {
-        modelRatio: String(p.model_ratio ?? exists.modelRatio),
-        completionRatio: String(p.completion_ratio ?? exists.completionRatio),
-        modelPrice: String(p.model_price ?? exists.modelPrice),
-        quotaType: Number(p.quota_type ?? exists.quotaType),
-        groupRatio: String(p.group_ratio ?? exists.groupRatio),
+        modelRatio: String(p.model_ratio ?? model.modelRatio),
+        completionRatio: String(p.completion_ratio ?? model.completionRatio),
+        modelPrice: String(p.model_price ?? model.modelPrice),
+        quotaType: Number(p.quota_type ?? model.quotaType),
+        groupRatio: String(p.group_ratio ?? model.groupRatio),
       },
     });
+    synced += 1;
   }
-
-  return { synced: items.length };
+  return { synced };
 }
 
 export async function testModelAvailability() {

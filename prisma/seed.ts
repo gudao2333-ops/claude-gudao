@@ -46,6 +46,29 @@ async function main() {
     });
   }
 
+  const defaultChannel = await prisma.aiChannel.upsert({
+    where: { name: '默认 NewAPI 渠道' },
+    update: {
+      baseUrl: process.env.NEWAPI_BASE_URL ?? 'https://api.gudao.one',
+      apiKey: process.env.NEWAPI_API_KEY ?? 'sk-your-newapi-key',
+      defaultGroup: process.env.NEWAPI_DEFAULT_GROUP ?? 'default',
+      enabled: true,
+      priority: 100,
+      timeoutMs: 60000,
+      remark: '由 seed 初始化，可在后台渠道管理中修改',
+    },
+    create: {
+      name: '默认 NewAPI 渠道',
+      baseUrl: process.env.NEWAPI_BASE_URL ?? 'https://api.gudao.one',
+      apiKey: process.env.NEWAPI_API_KEY ?? 'sk-your-newapi-key',
+      defaultGroup: process.env.NEWAPI_DEFAULT_GROUP ?? 'default',
+      enabled: true,
+      priority: 100,
+      timeoutMs: 60000,
+      remark: '由 seed 初始化，可在后台渠道管理中修改',
+    },
+  });
+
   const models = [
     {
       name: '智能版',
@@ -83,6 +106,7 @@ async function main() {
       },
       create: {
         ...model,
+        channelId: defaultChannel.id,
         quotaToCnyRate: '0.000015',
         profitRate: '1.6',
       },

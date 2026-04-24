@@ -25,6 +25,23 @@ async function getConfig() {
   return { baseUrl, apiKey, group };
 }
 
+export type NewApiConfigOverride = {
+  baseUrl?: string;
+  apiKey?: string;
+  group?: string;
+  timeoutMs?: number;
+};
+
+async function resolveConfig(override?: NewApiConfigOverride) {
+  const base = await getConfig();
+  return {
+    baseUrl: override?.baseUrl ?? base.baseUrl,
+    apiKey: override?.apiKey ?? base.apiKey,
+    group: override?.group ?? base.group,
+    timeoutMs: override?.timeoutMs ?? 60_000,
+  };
+}
+
 function sanitizeUpstreamError(status: number, text: string): NewApiError {
   if (status === 401 || status === 403) return new NewApiError('UPSTREAM_AUTH_ERROR', 'Upstream auth failed', status);
   if (status === 404) return new NewApiError('MODEL_UNAVAILABLE', 'Model unavailable', status);
@@ -33,10 +50,10 @@ function sanitizeUpstreamError(status: number, text: string): NewApiError {
   return new NewApiError('UPSTREAM_ERROR', text.slice(0, 120), status);
 }
 
-export async function chatCompletion(payload: Record<string, unknown>) {
-  const { baseUrl, apiKey, group } = await getConfig();
+export async function chatCompletion(payload: Record<string, unknown>, override?: NewApiConfigOverride) {
+  const { baseUrl, apiKey, group, timeoutMs } = await resolveConfig(override);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(`${baseUrl}/v1/chat/completions`, {
@@ -71,8 +88,8 @@ export async function chatCompletion(payload: Record<string, unknown>) {
   }
 }
 
-export async function streamChatCompletion(payload: Record<string, unknown>) {
-  const { baseUrl, apiKey, group } = await getConfig();
+export async function streamChatCompletion(payload: Record<string, unknown>, override?: NewApiConfigOverride) {
+  const { baseUrl, apiKey, group } = await resolveConfig(override);
   const res = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -124,8 +141,8 @@ export async function streamChatCompletion(payload: Record<string, unknown>) {
   };
 }
 
-export async function fetchPricing() {
-  const { baseUrl, apiKey } = await getConfig();
+export async function fetchPricing(override?: NewApiConfigOverride) {
+  const { baseUrl, apiKey } = await resolveConfig(override);
   const res = await fetch(`${baseUrl}/api/pricing`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -133,7 +150,7 @@ export async function fetchPricing() {
   return res.json();
 }
 
-export async function testConnection() {
-  const data = await chatCompletion({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 });
+export async function testConnection(override?: NewApiConfigOverride) {
+  const data = await chatCompletion({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }, override);
   return { ok: true, responseId: data.responseId };
 }

@@ -105,3 +105,8 @@ server {
    - 检查 PM2 进程状态与 Nginx 反代端口。
 5. NewAPI 连接失败
    - 检查 `NEWAPI_BASE_URL`、`NEWAPI_API_KEY`、服务器出网策略。
+
+## 多渠道 NewAPI 部署说明更新（2026-04）
+- `NEWAPI_BASE_URL` 与 `NEWAPI_API_KEY` 用作默认渠道或 seed 初始化来源。
+- 生产环境推荐登录后台后在 `/admin/channels` 独立维护渠道密钥与优先级。
+- 模型建议显式绑定渠道，避免走全局回退配置。

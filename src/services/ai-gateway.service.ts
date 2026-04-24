@@ -3,8 +3,9 @@ import { prisma } from '@/lib/prisma';
 import { safeDecimal } from '@/lib/decimal';
 import { chatCompletion, streamChatCompletion } from './newapi.service';
 import { createPreHold, refundHold, settleBill } from './balance.service';
-import { createConversation } from './conversation.service';
+import { createConversation, maybeAutoRenameConversation } from './conversation.service';
 import { createMessage } from './message.service';
+import { getChannelForModel } from './channel.service';
 
 async function getOrCreateConversation(userId: string, conversationId: string | undefined, modelKey: string, title?: string) {
   if (conversationId) {
@@ -22,6 +23,9 @@ export async function sendChat(input: {
 }) {
   const model = await prisma.aiModel.findUnique({ where: { modelKey: input.modelKey } });
   if (!model || !model.enabled || !model.visible) throw new Error('MODEL_UNAVAILABLE');
+
+  const channel = await getChannelForModel(model.id, model.channelId);
+  if (!channel) throw new Error('NO_AVAILABLE_CHANNEL');
 
   const user = await prisma.user.findUniqueOrThrow({ where: { id: input.userId } });
   if (safeDecimal(user.balance).lt(model.depositAmount)) {
@@ -53,6 +57,11 @@ export async function sendChat(input: {
       model: model.newapiModelName,
       messages: input.messages,
       max_tokens: model.maxOutputTokens,
+    }, {
+      baseUrl: channel.baseUrl,
+      apiKey: channel.apiKey,
+      group: channel.defaultGroup ?? undefined,
+      timeoutMs: channel.timeoutMs,
     });
 
     const settled = await settleBill({
@@ -64,6 +73,7 @@ export async function sendChat(input: {
 
     const userMsg = input.messages[input.messages.length - 1];
     if (userMsg?.role === 'user') {
+      await maybeAutoRenameConversation(conversation.id, input.userId, userMsg.content);
       await createMessage({
         conversationId: conversation.id,
         userId: input.userId,
@@ -109,6 +119,8 @@ export async function sendChatStream(input: {
 }) {
   const model = await prisma.aiModel.findUnique({ where: { modelKey: input.modelKey } });
   if (!model || !model.enabled || !model.visible) throw new Error('MODEL_UNAVAILABLE');
+  const channel = await getChannelForModel(model.id, model.channelId);
+  if (!channel) throw new Error('NO_AVAILABLE_CHANNEL');
 
   const conversation = await getOrCreateConversation(input.userId, input.conversationId, model.modelKey);
   const requestId = nanoid();
@@ -126,6 +138,7 @@ export async function sendChatStream(input: {
 
   const userMsg = input.messages[input.messages.length - 1];
   if (userMsg?.role === 'user') {
+    await maybeAutoRenameConversation(conversation.id, input.userId, userMsg.content);
     await createMessage({
       conversationId: conversation.id,
       userId: input.userId,
@@ -141,6 +154,11 @@ export async function sendChatStream(input: {
       model: model.newapiModelName,
       messages: input.messages,
       max_tokens: model.maxOutputTokens,
+    }, {
+      baseUrl: channel.baseUrl,
+      apiKey: channel.apiKey,
+      group: channel.defaultGroup ?? undefined,
+      timeoutMs: channel.timeoutMs,
     });
 
     const reader = stream.getReader();
@@ -154,7 +172,7 @@ export async function sendChatStream(input: {
             if (!finished) {
               finished = true;
               const { content, usage } = getFinal();
-              await settleBill({ billId: bill.id, usage, messages: input.messages, answer: content });
+              const settled = await settleBill({ billId: bill.id, usage, messages: input.messages, answer: content });
               await createMessage({
                 conversationId: conversation.id,
                 userId: input.userId,
@@ -163,6 +181,9 @@ export async function sendChatStream(input: {
                 modelKey: model.modelKey,
                 billId: bill.id,
               });
+              const billingEvent = `data: ${JSON.stringify({ type: 'billing', billId: bill.id, userCostCny: settled.userCostCny.toString(), balance: settled.balance.toString() })}\n\n`;
+              controller.enqueue(new TextEncoder().encode(billingEvent));
+              controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'done', billId: bill.id })}\n\n`));
             }
             controller.close();
             return;

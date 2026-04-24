@@ -191,3 +191,21 @@ server {
 - [aaPanel 部署指南](./docs/deploy-aapanel.md)
 - [生产上线检查清单](./docs/production-checklist.md)
 - [上线后 Smoke Test](./docs/smoke-test.md)
+
+## 多渠道 NewAPI 配置（2026-04）
+- 支持在 `/admin/channels` 管理多个 NewAPI 渠道（baseUrl/apiKey/defaultGroup/priority/timeout）。
+- 全局 `NEWAPI_BASE_URL` / `NEWAPI_API_KEY` 仍作为默认兼容配置，并在 seed 时初始化默认渠道。
+- 推荐在后台将模型绑定到具体渠道，按渠道测试连接与同步价格。
+
+## 模型绑定渠道与价格配置
+- 每个模型支持绑定 `channelId`。
+- 计费模式支持 `newapi_ratio`、`detailed_token`、`fixed` 三种。
+- 管理端模型表单支持详细价格字段配置；前台 `/api/models` 仍只返回安全展示字段。
+
+## 兑换码筛选与导出
+- `/admin/redeem-codes` 支持 code/status/batchNo/amount/usedBy/时间范围筛选。
+- 支持单个创建、批量生成、按筛选导出 CSV、批次统计汇总。
+
+## 流式输出显示 data: 原始文本排查
+- 前端已改为逐行解析 SSE `data:`，仅拼接 `choices[0].delta.content`。
+- 会忽略 `[DONE]` 与仅 usage chunk，避免将原始 JSON 显示到聊天正文。

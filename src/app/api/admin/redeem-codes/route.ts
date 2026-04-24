@@ -11,18 +11,33 @@ const createSchema = z.object({
   remark: z.string().optional(),
 });
 
+function toOptional(value: string | null) {
+  const v = value?.trim();
+  return v ? v : undefined;
+}
+
 export async function GET(req: Request) {
   try {
     await requireAdmin();
     const { searchParams } = new URL(req.url);
+    const status = toOptional(searchParams.get('status'));
+    if (status && !['unused', 'used', 'disabled', 'expired'].includes(status)) {
+      throw new Error('INVALID_STATUS');
+    }
     return ok(
       await listRedeemCodes({
         page: Number(searchParams.get('page') ?? 1),
         pageSize: Number(searchParams.get('pageSize') ?? 20),
-        status: (searchParams.get('status') as 'unused' | 'used' | 'disabled' | 'expired' | null) ?? undefined,
-        batchNo: searchParams.get('batchNo') ?? undefined,
-        code: searchParams.get('code') ?? undefined,
-        usedByUserId: searchParams.get('usedByUserId') ?? undefined,
+        status: status as 'unused' | 'used' | 'disabled' | 'expired' | undefined,
+        batchNo: toOptional(searchParams.get('batchNo')),
+        code: toOptional(searchParams.get('code')),
+        usedByUserId: toOptional(searchParams.get('usedByUserId')),
+        usedByEmail: toOptional(searchParams.get('usedByEmail')),
+        amount: toOptional(searchParams.get('amount')),
+        createdAtFrom: toOptional(searchParams.get('createdAtFrom')),
+        createdAtTo: toOptional(searchParams.get('createdAtTo')),
+        expiredAtFrom: toOptional(searchParams.get('expiredAtFrom')),
+        expiredAtTo: toOptional(searchParams.get('expiredAtTo')),
       }),
     );
   } catch (e) {

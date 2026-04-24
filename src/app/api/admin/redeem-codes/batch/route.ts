@@ -9,6 +9,7 @@ const schema = z.object({
   batchNo: z.string().optional(),
   expiredAt: z.string().datetime().optional(),
   remark: z.string().optional(),
+  codePrefix: z.string().max(12).optional(),
 });
 
 export async function POST(req: Request) {
@@ -20,6 +21,7 @@ export async function POST(req: Request) {
         ...input,
         expiredAt: input.expiredAt ? new Date(input.expiredAt) : undefined,
         createdByUserId: admin.id,
+        codePrefix: input.codePrefix,
       }),
     );
   } catch (e) {
